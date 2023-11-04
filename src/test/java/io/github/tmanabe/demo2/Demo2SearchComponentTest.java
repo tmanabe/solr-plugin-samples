@@ -15,7 +15,6 @@ import org.junit.rules.ExpectedException;
 import java.nio.ByteBuffer;
 import java.util.Base64;
 
-import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.is;
 
 public class Demo2SearchComponentTest extends BaseDistributedSearchTestCase {
@@ -68,7 +67,7 @@ public class Demo2SearchComponentTest extends BaseDistributedSearchTestCase {
     ModifiableSolrParams params = new ModifiableSolrParams();
     params.set(CommonParams.Q, "*:*");
     params.set(CommonParams.FL, "id, score");
-    params.set(CommonParams.SORT, "score desc");
+    params.set(CommonParams.SORT, "score desc, id asc");
     params.set(Demo2Params.DEMO2_FIELD_NAME, "vector");
     params.set(Demo2Params.DEMO2_QUERY_VECTOR, base64StringOf(0, 3, 4));  // -> (0, 0.6, 0.8)
     setDistributedParams(params);

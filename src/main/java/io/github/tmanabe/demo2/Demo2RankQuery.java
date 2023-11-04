@@ -51,7 +51,8 @@ public class Demo2RankQuery extends RankQuery {
       final CursorMark cursor = cmd.getCursorMark();
 
       final FieldDoc searchAfter = (null != cursor ? cursor.getSearchAfterFieldDoc() : null);
-      return TopFieldCollector.create(weightedSort, len, searchAfter, minNumFound);
+      TopDocsCollector wrappedTopDocsCollector = TopFieldCollector.create(weightedSort, len, searchAfter, minNumFound);
+      return new Demo2TopDocsCollector(searcher, wrappedTopDocsCollector, this);
     }
   }
 

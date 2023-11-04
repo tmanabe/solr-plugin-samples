@@ -66,7 +66,7 @@ public class Demo2SearchComponentSingleShardTest extends RestTestBase {
     SolrQuery query = new SolrQuery();
     query.add(CommonParams.Q, "*:*");
     query.add(CommonParams.FL, "id, score");
-    query.add(CommonParams.SORT, "score desc");
+    query.add(CommonParams.SORT, "score desc, id asc");
     query.add(Demo2Params.DEMO2_FIELD_NAME, "vector");
     query.add(Demo2Params.DEMO2_QUERY_VECTOR, base64StringOf(0, 3, 4));  // -> (0, 0.6, 0.8)
 
@@ -87,7 +87,7 @@ public class Demo2SearchComponentSingleShardTest extends RestTestBase {
     SolrQuery query = new SolrQuery();
     query.add(CommonParams.Q, "*:*");
     query.add(CommonParams.FL, "id, score");
-    query.add(CommonParams.SORT, "score desc");
+    query.add(CommonParams.SORT, "score desc, id asc");
     query.add(Demo2Params.DEMO2_FIELD_NAME, "no_document");
     query.add(Demo2Params.DEMO2_QUERY_VECTOR, base64StringOf(0, 3, 4));
 
@@ -108,7 +108,7 @@ public class Demo2SearchComponentSingleShardTest extends RestTestBase {
     SolrQuery query = new SolrQuery();
     query.add(CommonParams.Q, "*:*");
     query.add(CommonParams.FL, "id, score");
-    query.add(CommonParams.SORT, "score desc");
+    query.add(CommonParams.SORT, "score desc, id asc");
     query.add(Demo2Params.DEMO2_FIELD_NAME, "vector");
     query.add(Demo2Params.DEMO2_QUERY_VECTOR, base64StringOf(0, 1));
 
