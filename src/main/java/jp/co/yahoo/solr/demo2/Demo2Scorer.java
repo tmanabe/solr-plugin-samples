@@ -24,7 +24,7 @@ public class Demo2Scorer extends Scorer {
     this.binaryDocValues = leafReaderContext.reader().getBinaryDocValues(demo2Context.fieldName);
     this.queryVector = demo2Context.queryVector;
 
-    cachedScore = -Float.MAX_VALUE;
+    cachedScore = 0.0f;
   }
 
   @Override
@@ -34,10 +34,9 @@ public class Demo2Scorer extends Scorer {
 
   @Override
   public float score() throws IOException {
-    if (null == binaryDocValues) {
-      return -Float.MAX_VALUE;
+    if (null == binaryDocValues || docID() < binaryDocValues.docID()) {
+      return 0.0f;
     }
-    assert binaryDocValues.docID() <= docID();
     if (binaryDocValues.docID() == docID()) {
       return cachedScore;
     }
@@ -47,15 +46,15 @@ public class Demo2Scorer extends Scorer {
       BytesRef bytesRef = binaryDocValues.binaryValue();
       FloatBuffer floatBuffer = ByteBuffer.wrap(bytesRef.bytes, bytesRef.offset, bytesRef.length).asFloatBuffer();
       if (floatBuffer.limit() == queryVector.length) {
-        cachedScore = 0.0f;
+        cachedScore = 2.0f;
         for (int i = 0; i < floatBuffer.limit(); ++i) {
           cachedScore += floatBuffer.get(i) * queryVector[i];
         }
       } else {
-        cachedScore = -Float.MAX_VALUE;
+        cachedScore = 0.0f;
       }
     } else {
-      cachedScore = -Float.MAX_VALUE;
+      cachedScore = 0.0f;
     }
     return cachedScore;
   }
@@ -63,5 +62,10 @@ public class Demo2Scorer extends Scorer {
   @Override
   public DocIdSetIterator iterator() {
     return wrappedScorer.iterator();
+  }
+
+  @Override
+  public float getMaxScore(int i) throws IOException {
+    return wrappedScorer.getMaxScore(i);
   }
 }

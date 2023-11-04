@@ -15,6 +15,7 @@ import org.junit.rules.ExpectedException;
 import java.nio.ByteBuffer;
 import java.util.Base64;
 
+import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.is;
 
 public class Demo2SearchComponentTest extends BaseDistributedSearchTestCase {
@@ -67,7 +68,7 @@ public class Demo2SearchComponentTest extends BaseDistributedSearchTestCase {
     ModifiableSolrParams params = new ModifiableSolrParams();
     params.set(CommonParams.Q, "*:*");
     params.set(CommonParams.FL, "id, score");
-    params.set(CommonParams.SORT, "score desc, id asc");
+    params.set(CommonParams.SORT, "score desc");
     params.set(Demo2Params.DEMO2_FIELD_NAME, "vector");
     params.set(Demo2Params.DEMO2_QUERY_VECTOR, base64StringOf(0, 3, 4));  // -> (0, 0.6, 0.8)
     setDistributedParams(params);
@@ -82,10 +83,10 @@ public class Demo2SearchComponentTest extends BaseDistributedSearchTestCase {
     assertThat(actual.get(2).get("id").toString(), is("1"));
     assertThat(actual.get(3).get("id").toString(), is("3"));
 
-    assertThat(actual.get(0).get("score"), is(1.0f));
-    assertThat(actual.get(1).get("score"), is(0.0f));
-    assertThat(actual.get(2).get("score"), is(-0.6f));
-    assertThat(actual.get(3).get("score"), is(-Float.MAX_VALUE));
+    assertEquals((float) actual.get(0).get("score"), 3.0f, 1.0e-6f);
+    assertEquals((float) actual.get(1).get("score"), 2.0f, 1.0e-6f);
+    assertEquals((float) actual.get(2).get("score"), 1.4f, 1.0e-6f);
+    assertEquals((float) actual.get(3).get("score"), 0.0f, 1.0e-6f);
   }
 
   @Rule

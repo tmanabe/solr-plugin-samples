@@ -1,6 +1,6 @@
 package jp.co.yahoo.solr.demo2;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.solr.common.params.SolrParams;

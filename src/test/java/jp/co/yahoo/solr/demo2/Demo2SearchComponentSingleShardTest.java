@@ -66,7 +66,7 @@ public class Demo2SearchComponentSingleShardTest extends RestTestBase {
     SolrQuery query = new SolrQuery();
     query.add(CommonParams.Q, "*:*");
     query.add(CommonParams.FL, "id, score");
-    query.add(CommonParams.SORT, "score desc, id asc");
+    query.add(CommonParams.SORT, "score desc");
     query.add(Demo2Params.DEMO2_FIELD_NAME, "vector");
     query.add(Demo2Params.DEMO2_QUERY_VECTOR, base64StringOf(0, 3, 4));  // -> (0, 0.6, 0.8)
 
@@ -76,10 +76,10 @@ public class Demo2SearchComponentSingleShardTest extends RestTestBase {
              "/response/docs/[1]/id=='2'",
              "/response/docs/[2]/id=='1'",
              "/response/docs/[3]/id=='3'",
-             "/response/docs/[0]/score==1.0",
-             "/response/docs/[1]/score==0.0",
-             "/response/docs/[2]/score==-0.6",
-             "/response/docs/[3]/score==-" + Float.MAX_VALUE);
+             "/response/docs/[0]/score==3.0",
+             "/response/docs/[1]/score==2.0",
+             "/response/docs/[2]/score==1.4",
+             "/response/docs/[3]/score==0.0");
   }
 
   @Test
@@ -87,7 +87,7 @@ public class Demo2SearchComponentSingleShardTest extends RestTestBase {
     SolrQuery query = new SolrQuery();
     query.add(CommonParams.Q, "*:*");
     query.add(CommonParams.FL, "id, score");
-    query.add(CommonParams.SORT, "score desc, id asc");
+    query.add(CommonParams.SORT, "score desc");
     query.add(Demo2Params.DEMO2_FIELD_NAME, "no_document");
     query.add(Demo2Params.DEMO2_QUERY_VECTOR, base64StringOf(0, 3, 4));
 
@@ -97,10 +97,10 @@ public class Demo2SearchComponentSingleShardTest extends RestTestBase {
              "/response/docs/[1]/id=='1'",
              "/response/docs/[2]/id=='2'",
              "/response/docs/[3]/id=='3'",
-             "/response/docs/[0]/score==-" + Float.MAX_VALUE,
-             "/response/docs/[1]/score==-" + Float.MAX_VALUE,
-             "/response/docs/[2]/score==-" + Float.MAX_VALUE,
-             "/response/docs/[3]/score==-" + Float.MAX_VALUE);
+             "/response/docs/[0]/score==0.0",
+             "/response/docs/[1]/score==0.0",
+             "/response/docs/[2]/score==0.0",
+             "/response/docs/[3]/score==0.0");
   }
 
   @Test
@@ -108,7 +108,7 @@ public class Demo2SearchComponentSingleShardTest extends RestTestBase {
     SolrQuery query = new SolrQuery();
     query.add(CommonParams.Q, "*:*");
     query.add(CommonParams.FL, "id, score");
-    query.add(CommonParams.SORT, "score desc, id asc");
+    query.add(CommonParams.SORT, "score desc");
     query.add(Demo2Params.DEMO2_FIELD_NAME, "vector");
     query.add(Demo2Params.DEMO2_QUERY_VECTOR, base64StringOf(0, 1));
 

@@ -5,6 +5,7 @@ import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopDocsCollector;
 import org.apache.solr.common.SolrException;
@@ -38,8 +39,8 @@ public class DemoTopDocsCollector extends TopDocsCollector<ScoreDoc> {
   }
 
   @Override
-  public boolean needsScores() {
-    return wrappedTopDocsCollector.needsScores();
+  public ScoreMode scoreMode() {
+    return wrappedTopDocsCollector.scoreMode();
   }
 
   @Override
@@ -112,7 +113,6 @@ public class DemoTopDocsCollector extends TopDocsCollector<ScoreDoc> {
     }
     resultScoreDocs.addAll(posteriorScoreDocs);
 
-    return new TopDocs(wrappedTopDocs.totalHits, resultScoreDocs.toArray(new ScoreDoc[wrappedTopDocs.scoreDocs.length]),
-                       wrappedTopDocs.getMaxScore());
+    return new TopDocs(wrappedTopDocs.totalHits, resultScoreDocs.toArray(new ScoreDoc[wrappedTopDocs.scoreDocs.length]));
   }
 }

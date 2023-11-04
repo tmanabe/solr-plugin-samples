@@ -1,15 +1,14 @@
 package jp.co.yahoo.solr.demo;
 
+import org.apache.lucene.index.ExitableDirectoryReader;
 import org.apache.lucene.index.IndexReaderContext;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.ReaderUtil;
-import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.FieldComparator;
 import org.apache.lucene.search.LeafFieldComparator;
-import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.Scorable;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
-import org.apache.lucene.search.Weight;
 import org.apache.lucene.util.InPlaceMergeSorter;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.common.SolrDocument;
@@ -33,6 +32,7 @@ import org.apache.solr.search.DocIterator;
 import org.apache.solr.search.DocList;
 import org.apache.solr.search.SolrIndexSearcher;
 import org.apache.solr.search.SortSpec;
+import org.apache.solr.util.SolrResponseUtil;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -42,6 +42,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class DemoMergeStrategy implements MergeStrategy {
   private final DemoContext demoContext;
@@ -53,9 +54,9 @@ public class DemoMergeStrategy implements MergeStrategy {
   /*
    * @see org.apache.solr.handler.component.QueryComponent#unmarshalSortValues(SortSpec, NamedList, IndexSchema)
    */
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private NamedList unmarshalSortValues(SortSpec sortSpec, NamedList sortFieldValues) {
-    NamedList unmarshalledSortValsPerField = new NamedList();
+  private NamedList<List<Object>> unmarshalSortValues(
+          SortSpec sortSpec, NamedList<List<Object>> sortFieldValues, IndexSchema schema) {
+    NamedList<List<Object>> unmarshalledSortValsPerField = new NamedList<>();
 
     if (0 == sortFieldValues.size()) return unmarshalledSortValsPerField;
 
@@ -72,17 +73,17 @@ public class DemoMergeStrategy implements MergeStrategy {
 
       final String sortFieldName = sortField.getField();
       final String valueFieldName = sortFieldValues.getName(marshalledFieldNum);
-      assert sortFieldName.equals(
-          valueFieldName) : "sortFieldValues name key does not match expected SortField.getField";
+      assert sortFieldName.equals(valueFieldName)
+              : "sortFieldValues name key does not match expected SortField.getField";
 
-      List sortVals = (List) sortFieldValues.getVal(marshalledFieldNum);
+      List<Object> sortVals = sortFieldValues.getVal(marshalledFieldNum);
 
       final SchemaField schemaField = schemaFields.get(sortFieldNum);
       if (null == schemaField) {
         unmarshalledSortValsPerField.add(sortField.getField(), sortVals);
       } else {
         FieldType fieldType = schemaField.getType();
-        List unmarshalledSortVals = new ArrayList();
+        List<Object> unmarshalledSortVals = new ArrayList<>();
         for (Object sortVal : sortVals) {
           unmarshalledSortVals.add(fieldType.unmarshalSortValue(sortVal));
         }
@@ -96,7 +97,7 @@ public class DemoMergeStrategy implements MergeStrategy {
   /*
    * @see org.apache.solr.handler.component.QueryComponent#populateNextCursorMarkFromMergedShards(ResponseBuilder)
    */
-  @SuppressWarnings({"ConstantConditions", "unchecked"})
+  @SuppressWarnings({"ConstantConditions"})
   protected void populateNextCursorMarkFromMergedShards(ResponseBuilder rb) {
 
     final CursorMark lastCursorMark = rb.getCursorMark();
@@ -119,7 +120,7 @@ public class DemoMergeStrategy implements MergeStrategy {
     ShardDoc lastDoc = null;
     // ShardDoc and rb.resultIds are weird structures to work with...
     for (ShardDoc eachDoc : docsOnThisPage) {
-      if (null == lastDoc || lastDoc.positionInResponse  < eachDoc.positionInResponse) {
+      if (null == lastDoc || lastDoc.positionInResponse < eachDoc.positionInResponse) {
         lastDoc = eachDoc;
       }
     }
@@ -130,7 +131,7 @@ public class DemoMergeStrategy implements MergeStrategy {
         nextCursorMarkValues.add(lastDoc.score);
       } else {
         assert null != sf.getField() : "SortField has null field";
-        List<Object> fieldVals = (List<Object>) lastDoc.sortFieldValues.get(sf.getField());
+        List<Object> fieldVals = lastDoc.sortFieldValues.get(sf.getField());
         nextCursorMarkValues.add(fieldVals.get(lastDoc.orderInShard));
       }
     }
@@ -155,10 +156,9 @@ public class DemoMergeStrategy implements MergeStrategy {
     SortSpec ss = rb.getSortSpec();
     Sort sort = ss.getSort();
 
-    SortField[] sortFields;
-    if (sort != null) {
-      sortFields = sort.getSort();
-    } else {
+    SortField[] sortFields = null;
+    if (sort != null) sortFields = sort.getSort();
+    else {
       sortFields = new SortField[] {SortField.FIELD_SCORE};
     }
 
@@ -172,8 +172,9 @@ public class DemoMergeStrategy implements MergeStrategy {
 
     // Merge the docs via a priority queue so we don't have to sort *all* of the
     // documents... we only need to order the top (rows+start)
-    final ShardFieldSortedHitQueue queue = new ShardFieldSortedHitQueue(sortFields, ss.getOffset() + ss.getCount(),
-                                                                        rb.req.getSearcher());
+    final ShardFieldSortedHitQueue queue =
+            new ShardFieldSortedHitQueue(
+                    sortFields, ss.getOffset() + ss.getCount(), rb.req.getSearcher());
 
     NamedList<Object> shardInfo = null;
     if (rb.req.getParams().getBool(ShardParams.SHARDS_INFO, false)) {
@@ -182,8 +183,9 @@ public class DemoMergeStrategy implements MergeStrategy {
     }
 
     long numFound = 0;
+    boolean hitCountIsExact = true;
     Float maxScore = null;
-    boolean partialResults = false;
+    boolean thereArePartialResults = false;
     Boolean segmentTerminatedEarly = null;
     for (ShardResponse srsp : sreq.responses) {
       SolrDocumentList docs = null;
@@ -195,7 +197,7 @@ public class DemoMergeStrategy implements MergeStrategy {
         if (srsp.getException() != null) {
           Throwable t = srsp.getException();
           if (t instanceof SolrServerException) {
-            t = t.getCause();
+            t = ((SolrServerException) t).getCause();
           }
           nl.add("error", t.toString());
           StringWriter trace = new StringWriter();
@@ -205,14 +207,26 @@ public class DemoMergeStrategy implements MergeStrategy {
             nl.add("shardAddress", srsp.getShardAddress());
           }
         } else {
-          responseHeader = (NamedList<?>) srsp.getSolrResponse().getResponse().get("responseHeader");
-          final Object rhste = (responseHeader == null ? null : responseHeader.get(
-              SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY));
+          responseHeader =
+                  (NamedList<?>)
+                          SolrResponseUtil.getSubsectionFromShardResponse(
+                                  rb, srsp, "responseHeader", false);
+          if (responseHeader == null) {
+            continue;
+          }
+          final Object rhste =
+                  responseHeader.get(SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY);
           if (rhste != null) {
             nl.add(SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY, rhste);
           }
-          docs = (SolrDocumentList) srsp.getSolrResponse().getResponse().get("response");
+          docs =
+                  (SolrDocumentList)
+                          SolrResponseUtil.getSubsectionFromShardResponse(rb, srsp, "response", false);
+          if (docs == null) {
+            continue;
+          }
           nl.add("numFound", docs.getNumFound());
+          nl.add("numFoundExact", docs.getNumFoundExact());
           nl.add("maxScore", docs.getMaxScore());
           nl.add("shardAddress", srsp.getShardAddress());
         }
@@ -224,29 +238,38 @@ public class DemoMergeStrategy implements MergeStrategy {
       }
       // now that we've added the shard info, let's only proceed if we have no error.
       if (srsp.getException() != null) {
-        partialResults = true;
+        thereArePartialResults = true;
         continue;
       }
 
       if (docs == null) { // could have been initialized in the shards info block above
-        docs = (SolrDocumentList) srsp.getSolrResponse().getResponse().get("response");
+        docs =
+                Objects.requireNonNull(
+                        (SolrDocumentList)
+                                SolrResponseUtil.getSubsectionFromShardResponse(rb, srsp, "response", false));
       }
 
       if (responseHeader == null) { // could have been initialized in the shards info block above
-        responseHeader = (NamedList<?>) srsp.getSolrResponse().getResponse().get("responseHeader");
+        responseHeader =
+                Objects.requireNonNull(
+                        (NamedList<?>)
+                                SolrResponseUtil.getSubsectionFromShardResponse(
+                                        rb, srsp, "responseHeader", false));
       }
 
-      if (responseHeader != null) {
-        if (Boolean.TRUE.equals(responseHeader.get(SolrQueryResponse.RESPONSE_HEADER_PARTIAL_RESULTS_KEY))) {
-          partialResults = true;
-        }
-        if (!Boolean.TRUE.equals(segmentTerminatedEarly)) {
-          final Object ste = responseHeader.get(SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY);
-          if (Boolean.TRUE.equals(ste)) {
-            segmentTerminatedEarly = Boolean.TRUE;
-          } else if (Boolean.FALSE.equals(ste)) {
-            segmentTerminatedEarly = Boolean.FALSE;
-          }
+      final boolean thisResponseIsPartial;
+      thisResponseIsPartial =
+              Boolean.TRUE.equals(
+                      responseHeader.getBooleanArg(SolrQueryResponse.RESPONSE_HEADER_PARTIAL_RESULTS_KEY));
+      thereArePartialResults |= thisResponseIsPartial;
+
+      if (!Boolean.TRUE.equals(segmentTerminatedEarly)) {
+        final Object ste =
+                responseHeader.get(SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY);
+        if (Boolean.TRUE.equals(ste)) {
+          segmentTerminatedEarly = Boolean.TRUE;
+        } else if (Boolean.FALSE.equals(ste)) {
+          segmentTerminatedEarly = Boolean.FALSE;
         }
       }
 
@@ -256,8 +279,34 @@ public class DemoMergeStrategy implements MergeStrategy {
       }
       numFound += docs.getNumFound();
 
-      NamedList sortFieldValues = (NamedList) (srsp.getSolrResponse().getResponse().get("sort_values"));
-      NamedList unmarshalledSortFieldValues = unmarshalSortValues(ss, sortFieldValues);
+      if (hitCountIsExact && Boolean.FALSE.equals(docs.getNumFoundExact())) {
+        hitCountIsExact = false;
+      }
+
+      @SuppressWarnings("unchecked")
+      NamedList<List<Object>> sortFieldValues =
+              (NamedList<List<Object>>)
+                      SolrResponseUtil.getSubsectionFromShardResponse(rb, srsp, "sort_values", true);
+      if (null == sortFieldValues) {
+        sortFieldValues = new NamedList<>();
+      }
+
+      // if the SortSpec contains a field besides score or the Lucene docid, then the values will
+      // need to be unmarshalled from sortFieldValues.
+      boolean needsUnmarshalling = ss.includesNonScoreOrDocField();
+
+      // if we need to unmarshal the sortFieldValues for sorting but we have none, which can happen
+      // if partial results are being returned from the shard, then skip merging the results for the
+      // shard. This avoids an exception below. if the shard returned partial results but we don't
+      // need to unmarshal (a normal scoring query), then merge what we got.
+      if (thisResponseIsPartial && sortFieldValues.size() == 0 && needsUnmarshalling) {
+        continue;
+      }
+
+      // Checking needsUnmarshalling saves on iterating the SortFields in the SortSpec again.
+      NamedList<List<Object>> unmarshalledSortFieldValues =
+              needsUnmarshalling ? unmarshalSortValues(ss, sortFieldValues, schema) : new NamedList<>();
+
       // Field values in this per-shard response
       List<String> demoFieldValues = (List<String>) (srsp.getSolrResponse().getResponse().get(
           DemoParams.DEMO_RESPONSE_KEY));
@@ -309,13 +358,14 @@ public class DemoMergeStrategy implements MergeStrategy {
     // So we want to pop the last documents off the queue to get
     // the docs offset -> queuesize
     int resultSize = queue.size() - ss.getOffset();
-    resultSize = Math.max(0, resultSize);  // there may not be any docs in range
+    resultSize = Math.max(0, resultSize); // there may not be any docs in range
 
     Map<Object, ShardDoc> resultIds = new HashMap<>();
     List<ShardDoc> reversedResultShardDocs = new ArrayList<>();
     List<ShardDoc> reversedPriorShardDocs = new ArrayList<>();
     for (int i = resultSize - 1; i >= 0; i--) {
       ShardDoc shardDoc = queue.pop();
+      shardDoc.positionInResponse = i;
       // Need the toString() for correlation with other lists that must
       // be strings (like keys in highlighting, explain, etc)
       resultIds.put(shardDoc.id.toString(), shardDoc);
@@ -337,6 +387,7 @@ public class DemoMergeStrategy implements MergeStrategy {
     SolrDocumentList responseDocs = new SolrDocumentList();
     if (maxScore != null) responseDocs.setMaxScore(maxScore);
     responseDocs.setNumFound(numFound);
+    responseDocs.setNumFoundExact(hitCountIsExact);
     responseDocs.setStart(ss.getOffset());
     // size appropriately
     for (int i = 0; i < resultSize; i++) responseDocs.add(null);
@@ -349,33 +400,45 @@ public class DemoMergeStrategy implements MergeStrategy {
 
     populateNextCursorMarkFromMergedShards(rb);
 
-    if (partialResults) {
-      if (rb.rsp.getResponseHeader().get(SolrQueryResponse.RESPONSE_HEADER_PARTIAL_RESULTS_KEY) == null) {
-        rb.rsp.getResponseHeader().add(SolrQueryResponse.RESPONSE_HEADER_PARTIAL_RESULTS_KEY, Boolean.TRUE);
-      }
+    if (thereArePartialResults) {
+      rb.rsp
+              .getResponseHeader()
+              .asShallowMap()
+              .put(SolrQueryResponse.RESPONSE_HEADER_PARTIAL_RESULTS_KEY, Boolean.TRUE);
     }
     if (segmentTerminatedEarly != null) {
-      final Object existingSegmentTerminatedEarly = rb.rsp.getResponseHeader().get(
-          SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY);
+      final Object existingSegmentTerminatedEarly =
+              rb.rsp
+                      .getResponseHeader()
+                      .get(SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY);
       if (existingSegmentTerminatedEarly == null) {
-        rb.rsp.getResponseHeader().add(SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY,
-                                       segmentTerminatedEarly);
-      } else if (!Boolean.TRUE.equals(existingSegmentTerminatedEarly) && Boolean.TRUE.equals(segmentTerminatedEarly)) {
-        rb.rsp.getResponseHeader().remove(SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY);
-        rb.rsp.getResponseHeader().add(SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY, true);
+        rb.rsp
+                .getResponseHeader()
+                .add(
+                        SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY,
+                        segmentTerminatedEarly);
+      } else if (!Boolean.TRUE.equals(existingSegmentTerminatedEarly)
+              && Boolean.TRUE.equals(segmentTerminatedEarly)) {
+        rb.rsp
+                .getResponseHeader()
+                .remove(SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY);
+        rb.rsp
+                .getResponseHeader()
+                .add(
+                        SolrQueryResponse.RESPONSE_HEADER_SEGMENT_TERMINATED_EARLY_KEY,
+                        segmentTerminatedEarly);
       }
     }
   }
 
   /*
-   * @see org.apache.solr.handler.component.QueryComponent#FakeScorer
+   * @see org.apache.solr.handler.component.QueryComponent#ScoreAndDoc
    */
-  protected static class FakeScorer extends Scorer {
+  protected static class ScoreAndDoc extends Scorable {
     final int docid;
     final float score;
 
-    FakeScorer(int docid, float score) {
-      super(null);
+    ScoreAndDoc(int docid, float score) {
       this.docid = docid;
       this.score = score;
     }
@@ -386,23 +449,8 @@ public class DemoMergeStrategy implements MergeStrategy {
     }
 
     @Override
-    public float score() {
+    public float score() throws IOException {
       return score;
-    }
-
-    @Override
-    public DocIdSetIterator iterator() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Weight getWeight() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Collection<ChildScorer> getChildren() {
-      throw new UnsupportedOperationException();
     }
   }
 
@@ -427,72 +475,109 @@ public class DemoMergeStrategy implements MergeStrategy {
     // TODO: See SOLR-5595
     boolean fsv = req.getParams().getBool(ResponseBuilder.FIELD_SORT_VALUES, false);
     if (fsv) {
-      NamedList<Object[]> sortVals = new NamedList<>(); // order is important for the sort fields
-      IndexReaderContext topReaderContext = searcher.getTopReaderContext();
-      List<LeafReaderContext> leaves = topReaderContext.leaves();
-      LeafReaderContext currentLeaf = null;
-      if (leaves.size() == 1) {
-        // if there is a single segment, use that subReader and avoid looking up each time
-        currentLeaf = leaves.get(0);
-        leaves = null;
-      }
-
-      DocList docList = rb.getResults().docList;
-
-      // sort ids from lowest to highest so we can access them in order
-      int nDocs = docList == null ? 0 : docList.size();
-      final long[] sortedIds = new long[nDocs];
-      final float[] scores = new float[nDocs]; // doc scores, parallel to sortedIds
-      DocList docs = rb.getResults().docList;
-      DocIterator it = docs == null ? null : docs.iterator();
-      for (int i = 0; i < nDocs; i++) {
-        assert it != null;
-        sortedIds[i] = (((long) it.nextDoc()) << 32) | i;
-        scores[i] = docs.hasScores() ? it.score() : Float.NaN;
-      }
-
-      // sort ids and scores together
-      new InPlaceMergeSorter() {
-        @Override
-        protected void swap(int i, int j) {
-          long tmpId = sortedIds[i];
-          float tmpScore = scores[i];
-          sortedIds[i] = sortedIds[j];
-          scores[i] = scores[j];
-          sortedIds[j] = tmpId;
-          scores[j] = tmpScore;
+      try {
+        NamedList<Object[]> sortVals = new NamedList<>(); // order is important for the sort fields
+        IndexReaderContext topReaderContext = searcher.getTopReaderContext();
+        List<LeafReaderContext> leaves = topReaderContext.leaves();
+        LeafReaderContext currentLeaf = null;
+        if (leaves.size() == 1) {
+          // if there is a single segment, use that subReader and avoid looking up each time
+          currentLeaf = leaves.get(0);
+          leaves = null;
         }
 
-        @Override
-        protected int compare(int i, int j) {
-          return Long.compare(sortedIds[i], sortedIds[j]);
+        final DocList docs = rb.getResults().docList;
+
+        // sort ids from lowest to highest so we can access them in order
+        int nDocs = docs.size();
+        final long[] sortedIds = new long[nDocs];
+        final float[] scores = new float[nDocs]; // doc scores, parallel to sortedIds
+        DocIterator it = docs.iterator();
+        for (int i = 0; i < nDocs; i++) {
+          sortedIds[i] = (((long) it.nextDoc()) << 32) | i;
+          scores[i] = docs.hasScores() ? it.score() : Float.NaN;
         }
-      }.sort(0, sortedIds.length);
 
-      SortSpec sortSpec = rb.getSortSpec();
-      Sort sort = searcher.weightSort(sortSpec.getSort());
-      SortField[] sortFields = sort == null ? new SortField[] {SortField.FIELD_SCORE} : sort.getSort();
-      List<SchemaField> schemaFields = sortSpec.getSchemaFields();
+        // sort ids and scores together
+        new InPlaceMergeSorter() {
+          @Override
+          protected void swap(int i, int j) {
+            long tmpId = sortedIds[i];
+            float tmpScore = scores[i];
+            sortedIds[i] = sortedIds[j];
+            scores[i] = scores[j];
+            sortedIds[j] = tmpId;
+            scores[j] = tmpScore;
+          }
 
-      for (int fld = 0; fld < schemaFields.size(); fld++) {
-        SchemaField schemaField = schemaFields.get(fld);
-        FieldType ft = null == schemaField ? null : schemaField.getType();
-        SortField sortField = sortFields[fld];
+          @Override
+          protected int compare(int i, int j) {
+            return Long.compare(sortedIds[i], sortedIds[j]);
+          }
+        }.sort(0, sortedIds.length);
 
-        SortField.Type type = sortField.getType();
-        // :TODO: would be simpler to always serialize every position of SortField[]
-        if (type == SortField.Type.SCORE || type == SortField.Type.DOC) continue;
+        SortSpec sortSpec = rb.getSortSpec();
+        Sort sort = searcher.weightSort(sortSpec.getSort());
+        SortField[] sortFields =
+                sort == null ? new SortField[] {SortField.FIELD_SCORE} : sort.getSort();
+        List<SchemaField> schemaFields = sortSpec.getSchemaFields();
 
-        FieldComparator<?> comparator = sortField.getComparator(1, 0);
-        LeafFieldComparator leafComparator = null;
-        Object[] vals = new Object[nDocs];
+        for (int fld = 0; fld < schemaFields.size(); fld++) {
+          SchemaField schemaField = schemaFields.get(fld);
+          FieldType ft = null == schemaField ? null : schemaField.getType();
+          SortField sortField = sortFields[fld];
+
+          SortField.Type type = sortField.getType();
+          // :TODO: would be simpler to always serialize every position of SortField[]
+          if (type == SortField.Type.SCORE || type == SortField.Type.DOC) continue;
+
+          FieldComparator<?> comparator = sortField.getComparator(1, true);
+          LeafFieldComparator leafComparator = null;
+          Object[] vals = new Object[nDocs];
+
+          int lastIdx = -1;
+          int idx = 0;
+
+          for (int i = 0; i < sortedIds.length; ++i) {
+            long idAndPos = sortedIds[i];
+            float score = scores[i];
+            int doc = (int) (idAndPos >>> 32);
+            int position = (int) idAndPos;
+
+            if (leaves != null) {
+              idx = ReaderUtil.subIndex(doc, leaves);
+              currentLeaf = leaves.get(idx);
+              if (idx != lastIdx) {
+                // we switched segments.  invalidate leafComparator.
+                lastIdx = idx;
+                leafComparator = null;
+              }
+            }
+
+            if (leafComparator == null) {
+              leafComparator = comparator.getLeafComparator(currentLeaf);
+            }
+
+            doc -= currentLeaf.docBase; // adjust for what segment this is in
+            leafComparator.setScorer(new ScoreAndDoc(doc, score));
+            leafComparator.copy(0, doc);
+            Object val = comparator.value(0);
+            if (null != ft) val = ft.marshalSortValue(val);
+            vals[position] = val;
+          }
+
+          sortVals.add(sortField.getField(), vals);
+        }
+        rsp.add("sort_values", sortVals);
+
+        // Modification for demo starts here
+        NumericDocValuesAccessor numericDocValuesAccessor = null;
+        String[] docValuesStrs = new String[nDocs];
 
         int lastIdx = -1;
-        int idx = 0;
+        int idx;
 
-        for (int i = 0; i < sortedIds.length; ++i) {
-          long idAndPos = sortedIds[i];
-          float score = scores[i];
+        for (long idAndPos : sortedIds) {
           int doc = (int) (idAndPos >>> 32);
           int position = (int) idAndPos;
 
@@ -500,60 +585,28 @@ public class DemoMergeStrategy implements MergeStrategy {
             idx = ReaderUtil.subIndex(doc, leaves);
             currentLeaf = leaves.get(idx);
             if (idx != lastIdx) {
-              // we switched segments.  invalidate leafComparator.
+              // we switched segments. Invalidate numeridDocValuesAccessor.
               lastIdx = idx;
-              leafComparator = null;
+              numericDocValuesAccessor = null;
             }
           }
 
-          if (leafComparator == null) {
-            leafComparator = comparator.getLeafComparator(currentLeaf);
+          if (numericDocValuesAccessor == null) {
+            numericDocValuesAccessor = new NumericDocValuesAccessor(demoContext.fieldName, currentLeaf);
           }
 
           doc -= currentLeaf.docBase;  // adjust for what segment this is in
-          leafComparator.setScorer(new FakeScorer(doc, score));
-          leafComparator.copy(0, doc);
-          Object val = comparator.value(0);
-          if (null != ft) val = ft.marshalSortValue(val);
-          vals[position] = val;
+          Long docValue = numericDocValuesAccessor.getLongValue(doc);
+          docValuesStrs[position] = String.valueOf(docValue);
         }
 
-        sortVals.add(sortField.getField(), vals);
+        rsp.add(DemoParams.DEMO_RESPONSE_KEY, docValuesStrs);
+      } catch (ExitableDirectoryReader.ExitingReaderException x) {
+        // it's hard to understand where we stopped, so yield nothing
+        // search handler will flag partial results
+        rsp.add("sort_values", new NamedList<>());
+        throw x;
       }
-
-      rsp.add("sort_values", sortVals);
-
-      // Modification for demo starts here
-      NumericDocValuesAccessor numericDocValuesAccessor = null;
-      String[] docValuesStrs = new String[nDocs];
-
-      int lastIdx = -1;
-      int idx;
-
-      for (long idAndPos : sortedIds) {
-        int doc = (int) (idAndPos >>> 32);
-        int position = (int) idAndPos;
-
-        if (leaves != null) {
-          idx = ReaderUtil.subIndex(doc, leaves);
-          currentLeaf = leaves.get(idx);
-          if (idx != lastIdx) {
-            // we switched segments. Invalidate numeridDocValuesAccessor.
-            lastIdx = idx;
-            numericDocValuesAccessor = null;
-          }
-        }
-
-        if (numericDocValuesAccessor == null) {
-          numericDocValuesAccessor = new NumericDocValuesAccessor(demoContext.fieldName, currentLeaf);
-        }
-
-        doc -= currentLeaf.docBase;  // adjust for what segment this is in
-        Long docValue = numericDocValuesAccessor.getLongValue(doc);
-        docValuesStrs[position] = String.valueOf(docValue);
-      }
-
-      rsp.add(DemoParams.DEMO_RESPONSE_KEY, docValuesStrs);
     }
   }
 

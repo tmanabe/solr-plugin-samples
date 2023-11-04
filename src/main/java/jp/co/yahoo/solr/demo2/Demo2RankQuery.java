@@ -4,6 +4,8 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.TopDocsCollector;
 import org.apache.lucene.search.TopFieldCollector;
@@ -14,7 +16,6 @@ import org.apache.solr.search.CursorMark;
 import org.apache.solr.search.QueryCommand;
 import org.apache.solr.search.QueryUtils;
 import org.apache.solr.search.RankQuery;
-import org.apache.solr.search.SolrIndexSearcher;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -32,26 +33,25 @@ public class Demo2RankQuery extends RankQuery {
     this.demo2Context = demo2Context;
   }
 
+  public Sort weightSort(Sort sort, IndexSearcher searcher) throws IOException {
+    return (sort != null) ? sort.rewrite(searcher) : null;
+  }
+
   @SuppressWarnings("rawtypes")
   @Override
   public TopDocsCollector getTopDocsCollector(int len, QueryCommand cmd, IndexSearcher searcher) throws IOException {
     // cf. SolrIndexSearcher#buildTopDocsCollector
+    int minNumFound = cmd.getMinExactCount();
     if (null == cmd.getSort()) {
       assert null == cmd.getCursorMark() : "have cursor but no sort";
-      return TopScoreDocCollector.create(len);
+      return TopScoreDocCollector.create(len, minNumFound);
     } else {
       // we have a sort
-      final boolean needScores = (cmd.getFlags() & SolrIndexSearcher.GET_SCORES) != 0;
-      final Sort weightedSort = (cmd.getSort() == null) ? null : cmd.getSort().rewrite(searcher);
+      final Sort weightedSort = weightSort(cmd.getSort(), searcher);
       final CursorMark cursor = cmd.getCursorMark();
 
-      // :TODO: make fillFields its own QueryCommand flag? ...
-      // ... see comments in populateNextCursorMarkFromTopDocs for cache issues (SOLR-5595)
-      final boolean fillFields = (null != cursor);
       final FieldDoc searchAfter = (null != cursor ? cursor.getSearchAfterFieldDoc() : null);
-      assert weightedSort != null;
-      return TopFieldCollector.create(weightedSort, len, searchAfter, fillFields, needScores,
-                                      needScores, true);
+      return TopFieldCollector.create(weightedSort, len, searchAfter, minNumFound);
     }
   }
 
@@ -74,8 +74,8 @@ public class Demo2RankQuery extends RankQuery {
   }
 
   @Override
-  public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
-    return new Demo2Weight(this, wrappedQuery.createWeight(searcher, needsScores, boost));
+  public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
+    return new Demo2Weight(this, wrappedQuery.createWeight(searcher, scoreMode, boost));
   }
 
   @Override
@@ -86,6 +86,11 @@ public class Demo2RankQuery extends RankQuery {
     } else {
       return new Demo2RankQuery(demo2Context).wrap(q);
     }
+  }
+
+  @Override
+  public void visit(QueryVisitor queryVisitor) {
+    queryVisitor.visitLeaf(this);
   }
 
   @Override

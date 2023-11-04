@@ -1,13 +1,11 @@
 package jp.co.yahoo.solr.demo2;
 
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.Term;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Weight;
 
 import java.io.IOException;
-import java.util.Set;
 
 public class Demo2Weight extends Weight {
   private final Weight wrappedWeight;  // The original weight wrapped in this weight
@@ -21,11 +19,6 @@ public class Demo2Weight extends Weight {
 
   public Demo2Context getDemo2Context() {
     return demo2Context;
-  }
-
-  @Override
-  public void extractTerms(Set<Term> terms) {
-    wrappedWeight.extractTerms(terms);
   }
 
   @Override
