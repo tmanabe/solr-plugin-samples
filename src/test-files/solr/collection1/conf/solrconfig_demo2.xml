@@ -21,7 +21,7 @@
     <requestParsers enableStreamBody="true"/>
   </requestDispatcher>
 
-  <searchComponent name="demo2Component" class="jp.co.yahoo.solr.demo2.Demo2SearchComponent"/>
+  <searchComponent name="demo2Component" class="io.github.tmanabe.demo2.Demo2SearchComponent"/>
 
   <requestHandler name="/select" class="solr.SearchHandler">
     <arr name="last-components">
